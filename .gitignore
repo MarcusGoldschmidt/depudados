@@ -18,3 +18,7 @@
 go.work
 
 *.db
+
+out
+
+.idea

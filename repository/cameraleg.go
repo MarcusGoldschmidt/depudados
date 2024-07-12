@@ -89,7 +89,7 @@ func GetDeputados() ([]*models.Deputado, error) {
 	})
 
 	c.OnRequest(func(r *colly.Request) {
-		fmt.Println("Visiting: ", r.URL.String())
+		log.Println("Visiting: ", r.URL.String())
 	})
 
 	for i := 1; i < 25; i++ {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"depudados/models"
 	"depudados/repository"
 	"flag"
@@ -14,7 +15,18 @@ func main() {
 	loadDeputados := flag.Bool("load-deputados", false, "deve carregar todos os deputados")
 	csvFile := flag.String("generate-csv", "", "criar arquivo csv")
 
+	plp := flag.String("plp", "", "download de plp")
+
 	flag.Parse()
+
+	if *plp != "" {
+		err := runPlpMetadata(*plp)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		return
+	}
 
 	db, err := bolt.Open("my1.db", 0600, nil)
 
@@ -121,6 +133,28 @@ func createBuckets(db *bolt.DB) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+
+	return nil
+}
+
+func runPlpMetadata(plpId string) error {
+	ctx := context.Background()
+
+	plp, err := repository.GetPLP(plpId)
+	if err != nil {
+		return err
+	}
+
+	plp.Process(ctx)
+
+	err = plp.AnyError()
+	if err != nil {
+		return err
+	}
+
+	csv := plp.ToCsv()
+
+	fmt.Println(csv)
 
 	return nil
 }
