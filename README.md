@@ -6,12 +6,16 @@ Baixa propocições de deputados e extrai seus metadados
 
 ```bash
 go run main.go --help
-# Flags
---generate-csv string
-criar arquivo csv
---load-deputados
-deve carregar todos os deputados
 ```
+
+### PLP
+
+```bash
+# Obtem arquivos e metadados de uma PLP 
+go run main.go --plp 2430143 > output.csv
+```
+
+### Proposicoes
 
 ```bash
 # Carrega deputados
@@ -27,4 +31,3 @@ go run main.go
 # Cria arquivo csv com os dados obtidos
 go run main.go --generate-csv data.csv
 ```
-
