@@ -88,10 +88,6 @@ func GetDeputados() ([]*models.Deputado, error) {
 		deputados = append(deputados, models.NewDeputado(split[len(split)-1], e.Text))
 	})
 
-	c.OnRequest(func(r *colly.Request) {
-		log.Println("Visiting: ", r.URL.String())
-	})
-
 	for i := 1; i < 25; i++ {
 		err := c.Visit(deputadosUrl + strconv.Itoa(i))
 		if err != nil {

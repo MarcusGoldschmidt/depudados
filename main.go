@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"depudados/cameraleg"
+	"depudados/metadata"
 	"depudados/models"
 	"depudados/repository"
 	"flag"
@@ -9,6 +11,7 @@ import (
 	"github.com/boltdb/bolt"
 	"log"
 	"os"
+	"runtime"
 )
 
 func main() {
@@ -17,10 +20,21 @@ func main() {
 
 	plp := flag.String("plp", "", "download de plp")
 
+	allAno := flag.String("allAno", "", "arquivo de download por ano")
+
 	flag.Parse()
 
 	if *plp != "" {
 		err := runPlpMetadata(*plp)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		return
+	}
+
+	if *allAno != "" {
+		err := runGetAllPorAno(*allAno)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -137,22 +151,42 @@ func createBuckets(db *bolt.DB) error {
 	return nil
 }
 
-func runPlpMetadata(plpId string) error {
+func runGetAllPorAno(file string) error {
 	ctx := context.Background()
 
-	plp, err := repository.GetPLP(plpId)
+	proposicao, err := cameraleg.GetAllProposicao(ctx, file, true)
 	if err != nil {
 		return err
 	}
 
-	plp.Process(ctx)
+	csv := proposicao.ToCsv()
+
+	fmt.Println(csv)
+
+	return nil
+}
+
+func runPlpMetadata(plpId string) error {
+	ctx := context.Background()
+
+	et, err := metadata.NewExtractorPool(runtime.NumCPU())
+	if err != nil {
+		return err
+	}
+
+	plp, err := cameraleg.GetPLP(plpId)
+	if err != nil {
+		return err
+	}
+
+	plp.Process(ctx, et, true)
 
 	err = plp.AnyError()
 	if err != nil {
 		return err
 	}
 
-	csv := plp.ToCsv()
+	csv := plp.ToCsv(map[string]int{}, true)
 
 	fmt.Println(csv)
 

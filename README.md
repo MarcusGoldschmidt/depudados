@@ -15,6 +15,13 @@ go run main.go --help
 go run main.go --plp 2430143 > output.csv
 ```
 
+### Todos por ano
+
+```bash
+# Obtem arquivos e metadados de uma PLP 
+go run main.go --allAno ./proposicoes-2024 > output.csv
+```
+
 ### Proposicoes
 
 ```bash
