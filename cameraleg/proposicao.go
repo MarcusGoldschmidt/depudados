@@ -1,16 +1,10 @@
 package cameraleg
 
 import (
-	"context"
-	"depudados/metadata"
 	"encoding/json"
-	"github.com/sourcegraph/conc/pool"
-	"io"
+	"github.com/sourcegraph/conc/iter"
 	"log"
 	"os"
-	"runtime"
-	"strconv"
-	"sync"
 )
 
 type Proposicao struct {
@@ -48,65 +42,43 @@ type Proposicao struct {
 	} `json:"ultimoStatus"`
 }
 
-func LoadProposicao(reader io.Reader) ([]*Proposicao, error) {
-	var response struct {
-		Dados []*Proposicao `json:"dados"`
+func LoadProposicao(files []string) ([]*Proposicao, error) {
+	if len(files) == 0 {
+		return make([]*Proposicao, 0), nil
 	}
 
-	err := json.NewDecoder(reader).Decode(&response)
+	tempResponse, err := iter.MapErr(files, func(fileName *string) ([]*Proposicao, error) {
+		var decodeTemp struct {
+			Dados []*Proposicao `json:"dados"`
+		}
+
+		file, err := os.Open(*fileName)
+		if err != nil {
+			log.Printf("error opening file %s: %s", fileName, err.Error())
+			return nil, err
+		}
+
+		err = json.NewDecoder(file).Decode(&decodeTemp)
+		if err != nil {
+			log.Printf("error decoding file %s: %s", fileName, err.Error())
+			return nil, err
+		}
+
+		err = file.Close()
+		if err != nil {
+			return nil, err
+		}
+
+		return decodeTemp.Dados, nil
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	return response.Dados, nil
-}
-
-func GetAllProposicao(ctx context.Context, fileName string, extractMetadata bool) (PLPList, error) {
-	et, err := metadata.NewExtractorPool(runtime.NumCPU())
-	if err != nil {
-		return nil, err
+	response := make([]*Proposicao, 0)
+	for i := range tempResponse {
+		response = append(response, tempResponse[i]...)
 	}
 
-	file, err := os.Open(fileName)
-	if err != nil {
-		return nil, err
-	}
-
-	proposicoes, err := LoadProposicao(file)
-	if err != nil {
-		return nil, err
-	}
-
-	// Start workers
-	plpWorkerPool := pool.New().WithMaxGoroutines(100)
-
-	resultLock := sync.Mutex{}
-	result := make([]*PLP, 0)
-
-	for _, prop := range proposicoes {
-		prop := prop
-
-		plpWorkerPool.Go(func() {
-			plp, err := GetPLP(strconv.Itoa(prop.Id))
-			if err != nil {
-				log.Printf("[ERR] for %d err: %s", prop.Id, err.Error())
-				return
-			}
-			resultLock.Lock()
-			result = append(result, plp)
-			resultLock.Unlock()
-
-			plp.Process(ctx, et, extractMetadata)
-
-			err = plp.AnyError()
-
-			if err != nil {
-				log.Printf("err for %s err: %s", plp.Id, err.Error())
-			}
-		})
-	}
-
-	plpWorkerPool.Wait()
-
-	return result, ctx.Err()
+	return response, nil
 }

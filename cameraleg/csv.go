@@ -9,6 +9,14 @@ import (
 
 type PLPList []*PLP
 
+func formatStringCsv(value string) string {
+	value = strings.ReplaceAll(value, ";", ",")
+	value = strings.ReplaceAll(value, "\n", " ")
+	value = strings.ReplaceAll(value, "\"", "'")
+
+	return value
+}
+
 func (v PLPList) ToCsv() string {
 	buffer := bytes.NewBufferString("")
 
@@ -26,15 +34,7 @@ func (v PLPList) ToCsv() string {
 func (plp *PLP) ToCsv(fieldIndexMapping map[string]int, withHeader bool) string {
 	buffer := bytes.NewBufferString("")
 
-	for _, data := range plp.Destaques {
-		buffer.WriteString(data.ToCsv(fieldIndexMapping))
-	}
-
-	for _, data := range plp.EmentaProjeto {
-		buffer.WriteString(data.ToCsv(fieldIndexMapping))
-	}
-
-	for _, data := range plp.HistoricoDePareceres {
+	for _, data := range plp.Files {
 		buffer.WriteString(data.ToCsv(fieldIndexMapping))
 	}
 
@@ -50,24 +50,22 @@ func (plp *PLP) ToCsv(fieldIndexMapping map[string]int, withHeader bool) string 
 func (plp *PLPFileData) ToCsv(fieldIndexMapping map[string]int) string {
 	buffer := bytes.NewBufferString("")
 
-	buffer.WriteString(plp.Ementa + ";")
-	buffer.WriteString(plp.DataApresentacao + ";")
-	buffer.WriteString(plp.Autor + ";")
+	buffer.WriteString(formatStringCsv(plp.Id) + ";")
+	buffer.WriteString(formatStringCsv(plp.Ementa) + ";")
+	buffer.WriteString(formatStringCsv(plp.DataApresentacao) + ";")
+	buffer.WriteString(formatStringCsv(plp.Autor) + ";")
 	buffer.WriteString(plp.LinkInteiroTeor + ";")
 
 	list := make([]string, len(fieldIndexMapping))
 
-	for _, metadata := range plp.Metadados {
-		for k, v := range metadata.Fields {
+	for k, v := range plp.Metadados.Fields {
+		value := formatStringCsv(fmt.Sprintf("%v", v))
 
-			value := strings.ReplaceAll(fmt.Sprintf("%v", v), ";", ",")
-
-			if index, ok := (fieldIndexMapping)[k]; ok {
-				list[index] = value
-			} else {
-				(fieldIndexMapping)[k] = len(fieldIndexMapping)
-				list = append(list, value)
-			}
+		if index, ok := (fieldIndexMapping)[k]; ok {
+			list[index] = value
+		} else {
+			(fieldIndexMapping)[k] = len(fieldIndexMapping)
+			list = append(list, value)
 		}
 	}
 
@@ -81,7 +79,7 @@ func (plp *PLPFileData) ToCsv(fieldIndexMapping map[string]int) string {
 }
 
 func getHeader(fieldIndexMapping map[string]int) string {
-	header := "Ementa;DataApresentacao;Autor;LinkInteiroTeor;"
+	header := "Id;Ementa;DataApresentacao;Autor;LinkInteiroTeor;"
 
 	headerPosition := make([]struct {
 		v   string

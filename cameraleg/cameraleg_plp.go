@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"depudados/metadata"
+	"errors"
 	"github.com/barasher/go-exiftool"
 	"github.com/gocolly/colly/v2"
 	"github.com/sourcegraph/conc/pool"
@@ -14,29 +15,47 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 type PLP struct {
-	Id                   string
-	Destaques            []*PLPFileData
-	EmentaProjeto        []*PLPFileData
-	HistoricoDePareceres []*PLPFileData
+	Id           string
+	Files        []*PLPFileData `bson:"files"`
+	ProcessadoEm *time.Time     `bson:"processadoEm"`
 }
 
 func (plp *PLP) Len() int {
-	return len(plp.Destaques) + len(plp.EmentaProjeto) + len(plp.HistoricoDePareceres)
+	return len(plp.Files)
+}
+
+type FileMetadata struct {
+	File   string                 `bson:"file"`
+	Fields map[string]interface{} `bson:"fields"`
+}
+
+func EmptyFileMetadata() FileMetadata {
+	return FileMetadata{
+		File:   "",
+		Fields: map[string]interface{}{},
+	}
+}
+
+func NewFileMetadata(meta exiftool.FileMetadata) FileMetadata {
+	return FileMetadata{
+		Fields: meta.Fields,
+		File:   meta.File,
+	}
 }
 
 type PLPFileData struct {
-	Id               string
-	Ementa           string
-	DataApresentacao string
-	Autor            string
-	LinkInteiroTeor  string
-
-	Metadados []exiftool.FileMetadata
-
-	Err error
+	Id               string       `bson:"id"`
+	Type             string       `bson:"type"`
+	Ementa           string       `bson:"ementa"`
+	DataApresentacao string       `bson:"dataApresentacao"`
+	Autor            string       `bson:"autor"`
+	LinkInteiroTeor  string       `bson:"linkInteiroTeor"`
+	Metadados        FileMetadata `bson:"metadados"`
+	Err              string       `bson:"error"`
 }
 
 func (plp *PLPFileData) SetLink(link string) {
@@ -52,15 +71,16 @@ func (plp *PLPFileData) getOutputPath() string {
 	)
 }
 
-func GetPLP(proposicaoId string) (*PLP, error) {
+func ExtractPLP(proposicaoId string) (*PLP, error) {
 	plp := &PLP{
 		Id: proposicaoId,
 	}
 
 	var err error
 
-	plp.Destaques, err = extractPLPFileData(
+	err = plp.extractPLPFileData(
 		proposicaoId,
+		"Destaques",
 		"https://www.camara.leg.br/proposicoesWeb/prop_destaques?idProposicao="+proposicaoId+"&subst=0",
 		func(data *PLPFileData, element *colly.HTMLElement) {
 			data.Ementa = element.ChildText("td:nth-child(1)")
@@ -73,8 +93,9 @@ func GetPLP(proposicaoId string) (*PLP, error) {
 		return nil, err
 	}
 
-	plp.EmentaProjeto, err = extractPLPFileData(
+	err = plp.extractPLPFileData(
 		proposicaoId,
+		"EmentaProjeto",
 		"https://www.camara.leg.br/proposicoesWeb/prop_emendas?idProposicao="+proposicaoId+"&subst=0",
 		func(data *PLPFileData, element *colly.HTMLElement) {
 			data.Ementa = element.ChildText("td:nth-child(1)")
@@ -87,8 +108,9 @@ func GetPLP(proposicaoId string) (*PLP, error) {
 		return nil, err
 	}
 
-	plp.HistoricoDePareceres, err = extractPLPFileData(
+	err = plp.extractPLPFileData(
 		proposicaoId,
+		"HistoricoDePareceres",
 		"https://www.camara.leg.br/proposicoesWeb/prop_pareceres_substitutivos_votos?idProposicao="+proposicaoId+"&subst=0",
 		func(data *PLPFileData, element *colly.HTMLElement) {
 			data.Ementa = element.ChildText("td:nth-child(1)")
@@ -104,17 +126,24 @@ func GetPLP(proposicaoId string) (*PLP, error) {
 	return plp, nil
 }
 
-func extractPLPFileData(proposicaoId string, url string, extractDataFunc func(*PLPFileData, *colly.HTMLElement)) ([]*PLPFileData, error) {
+func (plp *PLP) extractPLPFileData(
+	proposicaoId string,
+	fileType string,
+	url string,
+	extractDataFunc func(*PLPFileData, *colly.HTMLElement),
+) error {
 	plps := make([]*PLPFileData, 0)
 
 	c := colly.NewCollector()
+	c.SetRequestTimeout(time.Second * 20)
 
 	c.OnHTML(".coresAlternadas", func(e *colly.HTMLElement) {
 		e.ForEach("tr", func(i int, e *colly.HTMLElement) {
 
 			plp := &PLPFileData{
 				Id:        proposicaoId,
-				Metadados: make([]exiftool.FileMetadata, 0),
+				Type:      fileType,
+				Metadados: EmptyFileMetadata(),
 			}
 
 			extractDataFunc(plp, e)
@@ -125,9 +154,11 @@ func extractPLPFileData(proposicaoId string, url string, extractDataFunc func(*P
 
 	err := c.Visit(url)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return plps, nil
+
+	plp.Files = append(plp.Files, plps...)
+	return nil
 }
 
 func (plp *PLP) getOutputPath() string {
@@ -135,8 +166,15 @@ func (plp *PLP) getOutputPath() string {
 }
 
 func (plp *PLP) Process(ctx context.Context, et *metadata.ExtractorPool, extractMetadata bool) {
+	if plp.Processed() {
+		log.Printf("Skipping PLP %s already processed\n", plp.Id)
+		return
+	}
+
 	if plp.Len() == 0 {
 		log.Printf("Skipping PLP %s has no files to process\n", plp.Id)
+		now := time.Now().UTC()
+		plp.ProcessadoEm = &now
 		return
 	}
 
@@ -151,21 +189,7 @@ func (plp *PLP) Process(ctx context.Context, et *metadata.ExtractorPool, extract
 
 	plpFileWorkerPool := pool.New().WithMaxGoroutines(workerCount)
 
-	for _, plp := range plp.Destaques {
-		plp := plp
-		plpFileWorkerPool.Go(func() {
-			plpWorker(ctx, et, plp, extractMetadata)
-		})
-	}
-
-	for _, plp := range plp.EmentaProjeto {
-		plp := plp
-		plpFileWorkerPool.Go(func() {
-			plpWorker(ctx, et, plp, extractMetadata)
-		})
-	}
-
-	for _, plp := range plp.HistoricoDePareceres {
+	for _, plp := range plp.Files {
 		plp := plp
 		plpFileWorkerPool.Go(func() {
 			plpWorker(ctx, et, plp, extractMetadata)
@@ -173,24 +197,18 @@ func (plp *PLP) Process(ctx context.Context, et *metadata.ExtractorPool, extract
 	}
 
 	plpFileWorkerPool.Wait()
+	now := time.Now().UTC()
+	plp.ProcessadoEm = &now
+}
+
+func (plp *PLP) Processed() bool {
+	return plp.ProcessadoEm != nil
 }
 
 func (plp *PLP) AnyError() error {
-	for _, plpFileData := range plp.Destaques {
-		if plpFileData.Err != nil {
-			return plpFileData.Err
-		}
-	}
-
-	for _, plpFileData := range plp.EmentaProjeto {
-		if plpFileData.Err != nil {
-			return plpFileData.Err
-		}
-	}
-
-	for _, plpFileData := range plp.HistoricoDePareceres {
-		if plpFileData.Err != nil {
-			return plpFileData.Err
+	for _, plpFileData := range plp.Files {
+		if plpFileData.Err != "" {
+			return errors.New(plpFileData.Err)
 		}
 	}
 
@@ -222,7 +240,7 @@ func plpWorker(ctx context.Context, et *metadata.ExtractorPool, plp *PLPFileData
 	if err != nil {
 		file, err = plp.Download(ctx)
 		if err != nil {
-			plp.Err = err
+			plp.Err = err.Error()
 			log.Printf("Error downloading file: %v\n", err)
 			return
 		}
@@ -230,25 +248,31 @@ func plpWorker(ctx context.Context, et *metadata.ExtractorPool, plp *PLPFileData
 
 	create, err := os.Create(fileName)
 	if err != nil {
-		plp.Err = err
+		plp.Err = err.Error()
 		return
 	}
 
 	_, err = io.Copy(create, bytes.NewBuffer(file))
 	if err != nil {
-		plp.Err = err
+		plp.Err = err.Error()
 		return
 	}
 
 	if extractMetadata == true {
 		fileInfos := et.ExtractMetadata(fileName)
 
-		for _, fileInfo := range fileInfos {
-			if fileInfo.Err != nil {
-				return
-			}
-
-			plp.Metadados = append(plp.Metadados, fileInfo)
+		if len(fileInfos) == 0 {
+			plp.Err = "no metadata found"
+			return
 		}
+
+		fileInfo := fileInfos[0]
+
+		if fileInfo.Err != nil {
+			plp.Err = fileInfo.Err.Error()
+			return
+		}
+
+		plp.Metadados = NewFileMetadata(fileInfo)
 	}
 }
