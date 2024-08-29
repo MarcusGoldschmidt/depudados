@@ -52,7 +52,9 @@ func (c *CameraLeg) GetAllToReport(ctx context.Context) (cameraleg.PLPList, erro
 }
 
 func (c *CameraLeg) ProcessMany(ctx context.Context, files []string, extractMetadata bool) (cameraleg.PLPList, error) {
-	et, err := metadata.NewExtractorPool(runtime.NumCPU())
+	workerCount := runtime.NumCPU() * 2
+
+	et, err := metadata.NewExtractorPool(workerCount)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +67,7 @@ func (c *CameraLeg) ProcessMany(ctx context.Context, files []string, extractMeta
 	log.Printf("total: %d", len(proposicoes))
 
 	// Start workers
-	plpWorkerPool := pool.New().WithMaxGoroutines(runtime.NumCPU())
+	plpWorkerPool := pool.New().WithMaxGoroutines(workerCount)
 
 	resultLock := sync.Mutex{}
 	result := make([]*cameraleg.PLP, 0)

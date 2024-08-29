@@ -19,7 +19,7 @@ go run main.go --plp 2430143 > output.csv
 
 ```bash
 # Obtem arquivos e metadados de uma PLP 
-go run main.go --allAno ./proposicoes-2024.json > output.csv
+go run main.go --allAno ./proposicoes-2024.json --allAno ./proposicoes-2023.json --allAno ./proposicoes-2022.json --allAno ./proposicoes-2021.json --allAno ./proposicoes-2020.json > output.csv
 ```
 
 ### Proposicoes
