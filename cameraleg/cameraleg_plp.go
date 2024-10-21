@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"depudados/metadata"
+	"depudados/shared"
 	"errors"
 	"github.com/barasher/go-exiftool"
 	"github.com/gocolly/colly/v2"
@@ -19,7 +20,7 @@ import (
 )
 
 type PLP struct {
-	Id           string
+	Id           string         `bson:"id"`
 	Files        []*PLPFileData `bson:"files"`
 	ProcessadoEm *time.Time     `bson:"processadoEm"`
 }
@@ -48,18 +49,26 @@ func NewFileMetadata(meta exiftool.FileMetadata) FileMetadata {
 }
 
 type PLPFileData struct {
-	Id               string       `bson:"id"`
-	Type             string       `bson:"type"`
-	Ementa           string       `bson:"ementa"`
-	DataApresentacao string       `bson:"dataApresentacao"`
-	Autor            string       `bson:"autor"`
-	LinkInteiroTeor  string       `bson:"linkInteiroTeor"`
-	Metadados        FileMetadata `bson:"metadados"`
-	Err              string       `bson:"error"`
+	Id string `bson:"id"`
+
+	Type             string            `bson:"type"`
+	Data             map[string]string `bson:"data"`
+	Ementa           string            `bson:"ementa"`
+	DataApresentacao string            `bson:"dataApresentacao"`
+	Autor            string            `bson:"autor"`
+
+	// File
+	Link      string       `bson:"link"`
+	Metadados FileMetadata `bson:"metadados"`
+	Err       string       `bson:"error"`
 }
 
-func (plp *PLPFileData) SetLink(link string) {
-	plp.LinkInteiroTeor = "https://www.camara.leg.br/proposicoesWeb/" + link
+func (plp *PLPFileData) SetData(key, value string) {
+	plp.Data[key] = value
+}
+
+func (plp *PLPFileData) SetLinkCamara(link string) {
+	plp.Link = "https://www.camara.leg.br/proposicoesWeb/" + link
 }
 
 func (plp *PLPFileData) getOutputPath() string {
@@ -71,29 +80,70 @@ func (plp *PLPFileData) getOutputPath() string {
 	)
 }
 
-func ExtractPLP(proposicaoId string) (*PLP, error) {
+func ExtractPLP(proposicaoId string, plpType shared.PlpType) (*PLP, error) {
+	if plpType == shared.SENADO {
+		return ExtractSenadoMateria(proposicaoId)
+	}
+
+	if plpType == shared.CAMARA {
+		return ExtractCamaraPLP(proposicaoId)
+	}
+
+	return nil, errors.New("invalid plp type")
+}
+
+// ExtractSenadoMateria extracts the PLP from the given id 164914
+func ExtractSenadoMateria(materiaId string) (*PLP, error) {
+	plp := &PLP{
+		Id: materiaId,
+	}
+
+	err := plp.extractPLPSenadoFileData(
+		materiaId,
+		"Destaques",
+		"https://www25.senado.leg.br/web/atividade/materias/-/materia/"+materiaId,
+		func(data *PLPFileData, element *colly.HTMLElement) {
+
+			data.SetData("identificacao", element.ChildText(".sf-texto-materia--coluna-dados dl dd:nth-child(2) span"))
+			data.Autor = element.ChildText(".sf-texto-materia--coluna-dados dl dd:nth-child(4)")
+			data.DataApresentacao = element.ChildText(".sf-texto-materia--coluna-dados dl dd:nth-child(6)")
+
+			data.Ementa = element.ChildText(".sf-texto-materia--coluna-dados dl dd:nth-child(8)")
+
+			data.Link = element.ChildAttr(".sf-texto-materia--coluna-link > span > a", "href")
+		},
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return plp, nil
+}
+
+func ExtractCamaraPLP(proposicaoId string) (*PLP, error) {
 	plp := &PLP{
 		Id: proposicaoId,
 	}
 
 	var err error
 
-	err = plp.extractPLPFileData(
+	err = plp.extractPLPCamaraFileData(
 		proposicaoId,
 		"Destaques",
 		"https://www.camara.leg.br/proposicoesWeb/prop_destaques?idProposicao="+proposicaoId+"&subst=0",
 		func(data *PLPFileData, element *colly.HTMLElement) {
-			data.Ementa = element.ChildText("td:nth-child(1)")
-			data.DataApresentacao = element.ChildText("td:nth-child(2)")
-			data.Autor = element.ChildText("td:nth-child(3)")
-			data.SetLink(element.ChildAttr("td:nth-child(4) a", "href"))
+			data.Data["ementa"] = element.ChildText("td:nth-child(1)")
+			data.Data["dataApresentacao"] = element.ChildText("td:nth-child(2)")
+			data.Data["autor"] = element.ChildText("td:nth-child(3)")
+			data.SetLinkCamara(element.ChildAttr("td:nth-child(4) a", "href"))
 		},
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	err = plp.extractPLPFileData(
+	err = plp.extractPLPCamaraFileData(
 		proposicaoId,
 		"EmentaProjeto",
 		"https://www.camara.leg.br/proposicoesWeb/prop_emendas?idProposicao="+proposicaoId+"&subst=0",
@@ -101,14 +151,14 @@ func ExtractPLP(proposicaoId string) (*PLP, error) {
 			data.Ementa = element.ChildText("td:nth-child(1)")
 			data.DataApresentacao = element.ChildText("td:nth-child(3)")
 			data.Autor = element.ChildText("td:nth-child(4)")
-			data.SetLink(element.ChildAttr("td:nth-child(5) a", "href"))
+			data.SetLinkCamara(element.ChildAttr("td:nth-child(5) a", "href"))
 		},
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	err = plp.extractPLPFileData(
+	err = plp.extractPLPCamaraFileData(
 		proposicaoId,
 		"HistoricoDePareceres",
 		"https://www.camara.leg.br/proposicoesWeb/prop_pareceres_substitutivos_votos?idProposicao="+proposicaoId+"&subst=0",
@@ -116,7 +166,7 @@ func ExtractPLP(proposicaoId string) (*PLP, error) {
 			data.Ementa = element.ChildText("td:nth-child(1)")
 			data.DataApresentacao = element.ChildText("td:nth-child(3)")
 			data.Autor = element.ChildText("td:nth-child(4)")
-			data.SetLink(element.ChildAttr("td:nth-child(5) a", "href"))
+			data.SetLinkCamara(element.ChildAttr("td:nth-child(5) a", "href"))
 		},
 	)
 	if err != nil {
@@ -126,9 +176,45 @@ func ExtractPLP(proposicaoId string) (*PLP, error) {
 	return plp, nil
 }
 
-func (plp *PLP) extractPLPFileData(
+func (plp *PLP) extractPLPSenadoFileData(
 	proposicaoId string,
-	fileType string,
+	plpType string,
+	url string,
+	extractDataFunc func(*PLPFileData, *colly.HTMLElement),
+) error {
+	plps := make([]*PLPFileData, 0)
+
+	c := colly.NewCollector()
+	c.SetRequestTimeout(time.Second * 20)
+
+	c.OnHTML("#materia_documentos_emendas", func(e *colly.HTMLElement) {
+		e.ForEach(".div-zebra > .sf-texto-materia", func(i int, e *colly.HTMLElement) {
+
+			plp := &PLPFileData{
+				Id:        proposicaoId,
+				Type:      plpType,
+				Metadados: EmptyFileMetadata(),
+				Data:      map[string]string{},
+			}
+
+			extractDataFunc(plp, e)
+
+			plps = append(plps, plp)
+		})
+	})
+
+	err := c.Visit(url)
+	if err != nil {
+		return err
+	}
+
+	plp.Files = append(plp.Files, plps...)
+	return nil
+}
+
+func (plp *PLP) extractPLPCamaraFileData(
+	proposicaoId string,
+	plpType string,
 	url string,
 	extractDataFunc func(*PLPFileData, *colly.HTMLElement),
 ) error {
@@ -142,8 +228,9 @@ func (plp *PLP) extractPLPFileData(
 
 			plp := &PLPFileData{
 				Id:        proposicaoId,
-				Type:      fileType,
+				Type:      plpType,
 				Metadados: EmptyFileMetadata(),
+				Data:      map[string]string{},
 			}
 
 			extractDataFunc(plp, e)
@@ -216,7 +303,7 @@ func (plp *PLP) AnyError() error {
 }
 
 func (plp *PLPFileData) Download(ctx context.Context) ([]byte, error) {
-	req, err := http.NewRequest(http.MethodGet, plp.LinkInteiroTeor, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, plp.Link, nil)
 
 	if err != nil {
 		return nil, err

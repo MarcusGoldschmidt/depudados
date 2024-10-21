@@ -5,6 +5,7 @@ import (
 	"depudados/cameraleg"
 	"depudados/metadata"
 	"depudados/repository"
+	"depudados/shared"
 	"github.com/sourcegraph/conc/pool"
 	"log"
 	"runtime"
@@ -20,8 +21,8 @@ func NewCameraLeg(persistence *repository.Persistence) *CameraLeg {
 	return &CameraLeg{persistence: persistence}
 }
 
-func (c *CameraLeg) ExtractAndPersist(ctx context.Context, id string) (*cameraleg.PLP, error) {
-	plp, err := cameraleg.ExtractPLP(id)
+func (c *CameraLeg) ExtractAndPersist(ctx context.Context, id string, plpType shared.PlpType) (*cameraleg.PLP, error) {
+	plp, err := cameraleg.ExtractPLP(id, plpType)
 	if err != nil {
 		return nil, err
 	}
@@ -34,14 +35,14 @@ func (c *CameraLeg) ExtractAndPersist(ctx context.Context, id string) (*camerale
 	return plp, err
 }
 
-func (c *CameraLeg) GetPLP(ctx context.Context, id string) (*cameraleg.PLP, error) {
+func (c *CameraLeg) GetPLP(ctx context.Context, id string, plpType shared.PlpType) (*cameraleg.PLP, error) {
 	plp, err := c.persistence.GetPlp(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
 	if plp == nil {
-		return c.ExtractAndPersist(ctx, id)
+		return c.ExtractAndPersist(ctx, id, plpType)
 	}
 
 	return plp, nil
@@ -51,7 +52,7 @@ func (c *CameraLeg) GetAllToReport(ctx context.Context) (cameraleg.PLPList, erro
 	return c.persistence.GetAllToReport(ctx)
 }
 
-func (c *CameraLeg) ProcessMany(ctx context.Context, files []string, extractMetadata bool) (cameraleg.PLPList, error) {
+func (c *CameraLeg) ProcessManyCamara(ctx context.Context, files []string, extractMetadata bool) (cameraleg.PLPList, error) {
 	workerCount := runtime.NumCPU() * 2
 
 	et, err := metadata.NewExtractorPool(workerCount)
@@ -76,7 +77,7 @@ func (c *CameraLeg) ProcessMany(ctx context.Context, files []string, extractMeta
 		prop := prop
 
 		plpWorkerPool.Go(func() {
-			plp, err := c.GetPLP(ctx, strconv.Itoa(prop.Id))
+			plp, err := c.GetPLP(ctx, strconv.Itoa(prop.Id), shared.CAMARA)
 			if err != nil {
 				log.Printf("[err] for %d err: %s", prop.Id, err.Error())
 				return

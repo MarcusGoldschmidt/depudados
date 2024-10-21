@@ -3,6 +3,7 @@ package cameraleg
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -54,11 +55,19 @@ func (plp *PLPFileData) ToCsv(fieldIndexMapping map[string]int) string {
 	buffer.WriteString(formatStringCsv(plp.Ementa) + ";")
 	buffer.WriteString(formatStringCsv(plp.DataApresentacao) + ";")
 	buffer.WriteString(formatStringCsv(plp.Autor) + ";")
-	buffer.WriteString(plp.LinkInteiroTeor + ";")
+	buffer.WriteString(plp.Link + ";")
 
 	list := make([]string, len(fieldIndexMapping))
 
-	for k, v := range plp.Metadados.Fields {
+	fields := map[string]interface{}{}
+
+	// Join fields from metadados and data
+	for k, v := range plp.Data {
+		fields[k] = v
+	}
+	maps.Copy(fields, plp.Metadados.Fields)
+
+	for k, v := range fields {
 		value := formatStringCsv(fmt.Sprintf("%v", v))
 
 		if index, ok := (fieldIndexMapping)[k]; ok {
@@ -79,7 +88,7 @@ func (plp *PLPFileData) ToCsv(fieldIndexMapping map[string]int) string {
 }
 
 func getHeader(fieldIndexMapping map[string]int) string {
-	header := "Id;Ementa;DataApresentacao;Autor;LinkInteiroTeor;"
+	header := "Id;Ementa;DataApresentacao;Autor;Link;"
 
 	headerPosition := make([]struct {
 		v   string
